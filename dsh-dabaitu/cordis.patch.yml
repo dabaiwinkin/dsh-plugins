@@ -1,0 +1,9 @@
+# 本包一处声明，两件事：
+# 1) 插入自己的组合行（client.js 里同时挂品牌槽位与主题 token 覆盖）；
+# 2) 让官方品牌填充退场。删除本包后官方鱼形标志、名称与原配色自动恢复。
+- insert:
+    - id: dabaitu-look
+      name: '@local/dsh-dabaitu'
+- id: ui-brand-official
+  name: '@deepseek-ai/dsh-client-ui-brand-official'
+  disabled: true

@@ -1,4 +1,4 @@
-# deepseek
+# dsh-plugins
 
 DeepSeek Harness（DSH）相关插件与实验项目集合，每个项目单独一个文件夹。
 
@@ -6,7 +6,7 @@ DeepSeek Harness（DSH）相关插件与实验项目集合，每个项目单独�
 
 | 文件夹 | 说明 |
 | --- | --- |
-| [\dsh-brand-dabaitu\](./dsh-brand-dabaitu) | DSH Web 客户端侧栏品牌替换：肉包吉祥物图标 + 「大白兔白又白」文字 |
+| [`dsh-dabaitu`](./dsh-dabaitu) | 大白兔外观包：侧栏品牌图标 + 「大白兔白又白」文字，以及护眼暖黄纸质主题与纸纹叠加层 |
 
 ## 使用
 

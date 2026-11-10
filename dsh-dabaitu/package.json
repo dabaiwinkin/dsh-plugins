@@ -1,0 +1,34 @@
+{
+  "name": "@local/dsh-dabaitu",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "大白兔外观包（一个插件管两件）：侧栏品牌图标 + 「大白兔白又白」文字，以及护眼暖黄纸质主题与纸纹叠加层。",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./assets/mark-128.png": "./assets/mark-128.png",
+    "./assets/paper-grain.png": "./assets/paper-grain.png",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "assets/mark-128.png",
+    "assets/paper-grain.png"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-theme"
+      ]
+    }
+  }
+}
