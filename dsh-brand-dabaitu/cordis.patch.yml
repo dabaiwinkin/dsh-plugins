@@ -1,0 +1,8 @@
+# 本组合包接管侧栏品牌：提供自己的 brand.mark / brand.name 填充，
+# 并让官方品牌填充退场；删除本组合包后官方鱼形标志与名称自动恢复。
+- insert:
+    - id: dabaitu-brand
+      name: '@local/dsh-brand-dabaitu'
+- id: ui-brand-official
+  name: '@deepseek-ai/dsh-client-ui-brand-official'
+  disabled: true

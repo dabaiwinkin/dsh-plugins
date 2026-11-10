@@ -1,0 +1,32 @@
+{
+  "name": "@local/dsh-brand-dabaitu",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "侧栏左上角品牌替换：肉包吉祥物图标 + 「大白兔白又白」文字（DSH Web 客户端插件）。",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "assets/mark-128.png"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  }
+}
