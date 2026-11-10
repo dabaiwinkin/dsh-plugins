@@ -140,9 +140,12 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'theme'],
       apply(ctx) {
         // 1) 品牌：等侧栏声明出现再注册，声明消失一并撤回。
+        //    这两个槽位是 kind:'single' 的 root 槽位，宿主槽位目录里它们的
+        //    registerOptions 是空的——照官方填充（dsh-client-ui-brand-official）与
+        //    LiveShare 的写法只给 name，不塞 id/key/label 这类不被接受的选项。
         ctx.slots.inject('sidebar.brand.mark', () => ctx.slots.inject('sidebar.brand.name', function* () {
-          yield ctx.slots.register({ name: 'sidebar.brand.mark', id: 'dabaitu' }, BunMark);
-          yield ctx.slots.register({ name: 'sidebar.brand.name', id: 'dabaitu' }, BunName);
+          yield ctx.slots.register({ name: 'sidebar.brand.mark' }, BunMark);
+          yield ctx.slots.register({ name: 'sidebar.brand.name' }, BunName);
         }));
 
         // 2) 调色：一层 token 覆盖，卸载时宿主自动撤销。

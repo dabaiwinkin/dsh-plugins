@@ -19,6 +19,16 @@
 
 全部改动只在运行时生效：卸载本包即恢复官方品牌与原配色。
 
+## 插件列表里的图标与名字
+
+插件自己带自定义图标与文字：`package.json` 顶层 `"icon": "./icon.svg"`（同一张肉包吉祥物，
+包在 128×76 的 SVG 里），显示名与说明放在 `locale/zh.json` / `locale/en.json` 的 `meta`
+（标题「大白兔白又白」）。这是宿主插件列表读取的两处元数据，改这两处就改插件卡片；
+`icon.svg` 由 `assets/mark-128.png` 生成，重新抠图见 `../.tools/cut_mark.py`。
+
+侧栏那两个槽位在宿主目录里是 `kind: 'single'`、`registerOptions` 为空，所以注册只给
+`name`，不塞 `id`/`key`/`label`——与官方填充和 LiveShare 的写法一致。
+
 ## 只想要其中一件
 
 - 只保留品牌：删掉 `apply()` 里第 2、3 段，以及 `inject` 里的 `'theme'` 和

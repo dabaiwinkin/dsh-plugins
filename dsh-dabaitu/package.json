@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "description": "大白兔外观包（一个插件管两件）：侧栏品牌图标 + 「大白兔白又白」文字，以及护眼暖黄纸质主题与纸纹叠加层。",
+  "icon": "./icon.svg",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
+    "./icon": "./icon.svg",
+    "./locale/*.json": "./locale/*.json",
     "./assets/mark-128.png": "./assets/mark-128.png",
     "./assets/paper-grain.png": "./assets/paper-grain.png",
     "./package.json": "./package.json"
@@ -15,6 +18,8 @@
     "index.js",
     "client.js",
     "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json",
     "assets/mark-128.png",
     "assets/paper-grain.png"
   ],
@@ -26,6 +31,7 @@
       "platform": "web",
       "immediately": true,
       "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-client-ui-sidebar",
         "@deepseek-ai/dsh-client-ui-theme"
       ]
