@@ -1,10 +1,10 @@
-/* dsh-dabaitu — 一个包管三件事：左上角品牌 + 护眼暖黄纸质主题 + 标题栏「豆包」入口。
+/* dsh-dabaitu — 一个包管三件事：左上角品牌 + 护眼暖黄纸质主题 + 外壳顶栏「豆包」入口。
  *
  * 形态与宿主自带客户端插件一致：client.js 用 window.__ModuleLoader__.load 注册自己
  * （id 必须等于包名），工厂返回 { inject: ['slots', 'theme'], apply(ctx) }。
  *   'slots' —— 侧栏品牌槽位（sidebar.brand.mark / sidebar.brand.name，由
- *              @deepseek-ai/dsh-client-ui-sidebar 声明）与标题栏的会话操作列表
- *              （conversation.session.header.actions，由 ui-conversation 声明）；
+ *              @deepseek-ai/dsh-client-ui-sidebar 声明）与外壳浮层（shell.overlay，
+ *              由 ui-layout 的 AppFrame 声明）；
  *   'theme' —— 宿主主题运行时（@deepseek-ai/dsh-client-ui-theme），ui-layout / 侧栏 /
  *              设置也都是通过 ctx.theme 取快照的。
  * 三段互不依赖：删掉 apply() 里对应的那一段，就只保留其余两件。
@@ -24,8 +24,13 @@
  * 纸纹：另装一个 <style>，照宿主自己那条叠加层的写法（fixed、pointer-events:none、
  * mix-blend-mode:multiply），把生成的无缝颗粒贴图乘到整个界面上。
  *
- * 「豆包」：标题行标题正后方多一个文字按钮，点它调 ctx.sidebarRight.openTab('browser',
- * { params: { url } })，也就是在应用内右侧的 Browser tab 里打开 doubao.com——不是系统
+ * 「豆包」：放在整个应用外壳的顶栏（Windows 上是那条 40px 的标题栏）最靠右的位置，
+ * 不是会话自己的标题行，所以切换/滚动会话它都不动。窗口最右上角那 138px 是 Windows 自己的
+ * 最小化/最大化/关闭按钮（Electron titleBarOverlay），压在下面就点不到，所以按钮从右边贴
+ * 窗口控制按钮的左边沿放——这是网页能占的最右一格（见 measureCaptionControls）。
+ * 挂的是 ui-layout 的 shell.overlay——全窗口、可点击穿透的浮层（它的子元素才接收指针
+ * 事件），所以按钮只占自己那一小块。点它调 ctx.sidebarRight.openTab('browser',
+ * { params: { url } })，也就是在应用内右侧的 Browser tab 里打开 doubao.com，不是系统
  * 浏览器。这两个服务用 ctx.get() 可选取用（宿主 ui-chat 也是这么做的），不在 inject 里
  * 声明：声明了就会在它们缺席时把整包挂起，纸纹与品牌跟着一起没了。
  */
@@ -114,23 +119,405 @@ function grainStyle(tag) {
   ].join('');
 }
 
-// 标题栏那个文字按钮的样子：与宿主自带的标题控件同一套排版（13px、圆角、hover 换底色），
-// 颜色全部走别名 token，所以它自己也跟着纸配色走。
+// 说明：窗口最右上角那块是 Windows 自己画的最小化/最大化/关闭三个按钮（Electron 的
+// titleBarOverlay，高度 40px），网页内容只能排在它左边，压在下面就点不到了。所以
+// 「最靠右」= 从右边贴第一条可用的空位算起，让出窗口控制按钮那一条。
+const CAPTION_CONTROLS_WIDTH = 'var(--dabaitu-caption-controls,138px)';
+const CAPTION_EDGE_GAP = 'var(--dabaitu-caption-gap,8px)';
+
 function actionStyle(tag) {
   tag.dataset.plugin = '@local/dsh-dabaitu';
   tag.dataset.pluginCss = 'header-action';
   tag.textContent = [
     '.dabaitu-header-action{',
+    'position:fixed;z-index:1000;box-sizing:border-box;',
+    'top:0;right:calc(' + CAPTION_CONTROLS_WIDTH + ' + ' + CAPTION_EDGE_GAP + ');',
+    'height:var(--dsh-windows-titlebar-height,40px);',
     '-webkit-app-region:no-drag;appearance:none;border:0;background:transparent;',
-    'display:inline-flex;align-items:center;gap:4px;min-height:24px;padding:0 8px;',
-    'border-radius:var(--dsw-radius-sm,6px);font:inherit;font-size:13px;font-weight:500;',
-    'line-height:20px;white-space:nowrap;cursor:pointer;',
+    'display:inline-flex;align-items:center;padding:0 10px;margin:0;',
+    'border-radius:6px;font:inherit;font-size:14px;font-weight:400;',
+    'line-height:20px;white-space:nowrap;cursor:default;',
     'color:var(--dsw-alias-label-secondary);transition:background .12s,color .12s',
     '}',
     '@media (hover:hover){.dabaitu-header-action:hover{',
     'background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}}',
-    '.dabaitu-header-action:focus-visible{outline:2px solid var(--dsw-alias-border-l3);outline-offset:2px}',
+    '.dabaitu-header-action:focus-visible{',
+    'outline:2px solid var(--dsw-alias-state-business-primary,var(--dsw-alias-border-l3));outline-offset:-2px}',
+    'html[data-input-modality="pointer"] .dabaitu-header-action:focus-visible{outline-color:transparent}',
+    // 截图按钮：紧挨在豆包左边，图标 + 一个小三角，点开是两种模式的下拉菜单。
+    '.dabaitu-shot{position:fixed;z-index:1000;box-sizing:border-box;top:0;',
+    'right:calc(' + CAPTION_CONTROLS_WIDTH + ' + ' + CAPTION_EDGE_GAP + ' + var(--dabaitu-doubao-width,52px) + 4px);',
+    'height:var(--dsh-windows-titlebar-height,40px);',
+    '-webkit-app-region:no-drag;appearance:none;border:0;background:transparent;',
+    'display:inline-flex;align-items:center;gap:3px;padding:0 8px;margin:0;',
+    'border-radius:6px;font:inherit;font-size:14px;font-weight:400;line-height:20px;',
+    'white-space:nowrap;cursor:default;color:var(--dsw-alias-label-secondary);',
+    'transition:background .12s,color .12s}',
+    '@media (hover:hover){.dabaitu-shot:hover{',
+    'background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}}',
+    '.dabaitu-shot:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,var(--dsw-alias-border-l3));outline-offset:-2px}',
+    '.dabaitu-shot svg{display:block;flex:none}',
   ].join('');
+}
+
+// 截图的各种浮层：拖框时的遮罩 + 选区、截完的小提示。
+// 十字光标用一张内联 SVG 画成红色（跨浏览器的 cursor 语法），不依赖系统光标主题。
+const SHOT_CURSOR = 'data:image/svg+xml;utf8,'
+  + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">'
+    + '<g stroke="#e5142a" stroke-width="2" shape-rendering="crispEdges">'
+    + '<path d="M16 0v11M16 21v11M0 16h11M21 16h11"/>'
+    + '</g><g stroke="#ffffff" stroke-width="1" opacity="0.65" shape-rendering="crispEdges">'
+    + '<path d="M16 1v10M16 21v10M1 16h10M21 16h10"/>'
+    + '</g></svg>');
+
+const SCRATCH_STYLE = [
+  '.dabaitu-shot-overlay{position:fixed;inset:0;z-index:2147483000;background:rgba(8,6,2,.28);',
+  'cursor:crosshair;cursor:url("' + SHOT_CURSOR + '") 16 16,crosshair}',
+  '.dabaitu-shot-veil{position:fixed;inset:0;background:rgba(8,6,2,.45);pointer-events:none}',
+  '.dabaitu-shot-rect{position:fixed;border:1.5px solid #e5142a;box-shadow:0 0 0 9999px rgba(8,6,2,.45);',
+  'pointer-events:none;box-sizing:border-box}',
+  '.dabaitu-shot-tip{position:fixed;z-index:2147483001;transform:translateX(-50%);padding:4px 8px;border-radius:6px;',
+  'background:rgba(20,16,10,.86);color:#fff;font-size:12px;line-height:16px;pointer-events:none;white-space:nowrap}',
+  '.dabaitu-shot-toast{position:fixed;z-index:2147483002;left:50%;bottom:28px;transform:translateX(-50%);',
+  'display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;',
+  'background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));color:var(--dsw-alias-label-primary);',
+  'border:.5px solid var(--dsw-alias-border-l3,transparent);box-shadow:0 10px 28px rgba(0,0,0,.22);',
+  'font-size:13px;line-height:18px}',
+  '.dabaitu-shot-toast img{display:block;max-width:120px;max-height:68px;border-radius:6px;',
+  'border:.5px solid var(--dsw-alias-border-l3,transparent)}',
+  '.dabaitu-shot-toast button{border:0;background:transparent;color:var(--dsw-alias-label-secondary);',
+  'font:inherit;cursor:pointer;padding:4px 8px;border-radius:6px}',
+  '.dabaitu-shot-toast button:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+].join('');
+
+// 插件设置页里那张品牌表单的样子：跟着宿主的 token 走，深浅色都正常。
+const BRAND_FORM_STYLE = [
+  '.dabaitu-brand-form{display:flex;flex-direction:column;gap:12px;padding:4px 0}',
+  '.dabaitu-brand-row{display:flex;align-items:center;gap:12px}',
+  '.dabaitu-brand-preview{width:56px;height:56px;object-fit:contain;flex:none;border-radius:8px;',
+  'background:var(--dsw-alias-bg-layer-2,transparent);border:.5px solid var(--dsw-alias-border-l3,transparent)}',
+  '.dabaitu-brand-col{display:flex;flex-direction:column;gap:6px;min-width:0}',
+  '.dabaitu-brand-field{display:flex;flex-direction:column;gap:6px}',
+  '.dabaitu-brand-hint{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:16px}',
+  '.dabaitu-brand-input{box-sizing:border-box;width:100%;max-width:360px;padding:6px 10px;border-radius:6px;',
+  'border:.5px solid var(--dsw-alias-border-l3,transparent);background:var(--dsw-alias-bg-layer-1,transparent);',
+  'color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:20px}',
+  '.dabaitu-brand-error{color:var(--dsw-alias-state-error-primary,#e5142a);font-size:12px;line-height:16px;margin:0}',
+  '.dabaitu-brand-actions{display:flex;align-items:center;gap:8px}',
+  '.dabaitu-brand-btn{padding:5px 12px;border-radius:6px;border:.5px solid var(--dsw-alias-border-l3,transparent);',
+  'background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:18px;cursor:pointer}',
+  '.dabaitu-brand-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+  '.dabaitu-brand-primary{background:var(--dsw-alias-interactive-bg-active);font-weight:500}',
+  // 品牌模态框（插件页头那个入口用）
+  '.dabaitu-brand-modal{position:fixed;inset:0;z-index:2147482000;display:flex;align-items:center;',
+  'justify-content:center;background:rgba(8,6,2,.45);padding:24px}',
+  '.dabaitu-brand-modal-body{box-sizing:border-box;width:min(440px,100%);max-height:80vh;overflow:auto;',
+  'padding:18px;border-radius:12px;border:.5px solid var(--dsw-alias-border-l3,transparent);',
+  'background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));color:var(--dsw-alias-label-primary);',
+  'box-shadow:0 16px 40px rgba(0,0,0,.28)}',
+  '.dabaitu-brand-modal-title{margin:0 0 10px;font-size:15px;line-height:22px;font-weight:500}',
+].join('');
+
+// 让出的宽度：优先问浏览器窗口控制区的真实几何（实现了 Window Controls Overlay 的环境才有），
+// 拿不到就按 Windows 上这三颗按钮的标准宽度 138px 算；两处都可以用上面对应的 CSS 变量微调。
+function measureCaptionControls(button) {
+  const sync = () => {
+    const overlay = navigator.windowControlsOverlay;
+    const rect = overlay?.visible === true && typeof overlay.getTitlebarAreaRect === 'function'
+      ? overlay.getTitlebarAreaRect()
+      : undefined;
+    const root = document.documentElement;
+    if (rect !== undefined && rect.width > 0 && window.innerWidth > 0) {
+      root.style.setProperty('--dabaitu-caption-controls', Math.ceil(window.innerWidth - rect.width) + 'px');
+    } else {
+      root.style.removeProperty('--dabaitu-caption-controls');
+    }
+  };
+  sync();
+  window.addEventListener('resize', sync);
+  navigator.windowControlsOverlay?.addEventListener?.('geometrychange', sync);
+  return sync;
+}
+
+// ── 截图：点一下直接进（只截本应用界面，不请求屏幕捕获权限）─────────────────────
+// 为什么不用 getDisplayMedia：宿主的 Electron 会话把媒体权限收得很死
+// （installMicrophonePermissions 只放行麦克风），display-capture 会被直接拒掉，
+// 页面里既看不到选择框也不报错——正是最初「点了没反应」的原因。
+// 所以改成「先给界面拍一张快照，再在快照上拉框」：
+//   1) 用 html-to-image 走的那套思路手写：把 DOM 与同源样式克隆进一个 SVG
+//      <foreignObject>，通过 <img> 栅格化成画布（不依赖第三方库，也不用任何权限）。
+//   2) 快照只取本应用界面——背后的其它窗口本来就不在页面里，天然就是纯净的应用截图。
+//   3) 拉框用的遮罩直接铺在这张快照上，按选区裁切 → 复制到剪贴板 → 底部缩略图提示。
+// 没有模式菜单：点剪刀就直接开始拉框截图。
+
+// 把当前界面栅格化成画布。foreignObject 需要内联样式，所以先把所有样式表拼成一段。
+// 返回 undefined 表示这条路走不通（Chromium 拒画 / 画布被污染），调用方会退回备用方案。
+function snapshotInterface() {
+  const width = Math.max(document.documentElement.clientWidth, window.innerWidth);
+  const height = Math.max(document.documentElement.clientHeight, window.innerHeight);
+  const inline = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    try {
+      for (const rule of Array.from(sheet.cssRules ?? [])) inline.push(rule.cssText);
+    } catch {
+      // 跨域样式表读不到规则，跳过；本应用的样式都是同源内联的，够用。
+    }
+  }
+  const clone = document.documentElement.cloneNode(true);
+  for (const node of Array.from(clone.querySelectorAll('script'))) node.remove();
+  // 只有 HTML 命名空间下的元素能进 foreignObject，SVG 命名空间混进去会让整段解析失败，
+  // 所以把 <svg> 图标换成等尺寸的占位（图标很小，视觉上几乎无感）。
+  for (const node of Array.from(clone.querySelectorAll('svg'))) {
+    const box = document.createElement('span');
+    const rect = node.getBoundingClientRect?.();
+    box.setAttribute('style', 'display:inline-block;width:' + Math.round(rect?.width ?? 15)
+      + 'px;height:' + Math.round(rect?.height ?? 15) + 'px');
+    node.replaceWith(box);
+  }
+  const style = document.createElement('style');
+  style.textContent = inline.join(String.fromCharCode(10));
+  clone.insertBefore(style, clone.firstChild);
+  const serialized = new XMLSerializer().serializeToString(clone);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '">'
+    + '<foreignObject x="0" y="0" width="100%" height="100%">'
+    + '<div xmlns="http://www.w3.org/1999/xhtml" style="width:' + width + 'px;height:' + height + 'px">'
+    + serialized + '</div></foreignObject></svg>';
+  const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      let canvas;
+      try {
+        canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(image, 0, 0, width, height);
+        // 抽查一个像素组：全透明说明这次栅格化没画上东西，别让用户对着空白图拉框。
+        const probe = canvas.getContext('2d').getImageData(
+          Math.floor(width / 2), Math.floor(height / 2), 1, 1,
+        ).data;
+        if (probe[3] === 0) {
+          resolve(undefined);
+          return;
+        }
+      } catch {
+        resolve(undefined);
+        return;
+      }
+      resolve(canvas);
+    };
+    image.onerror = () => resolve(undefined);
+    image.src = url;
+  });
+}
+
+// 备用方案：页面内快照走不通时，退成「整屏灰底 + 让用户自己拉框」，至少还能选区。
+function fallbackSurface() {
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, window.innerWidth);
+  canvas.height = Math.max(1, window.innerHeight);
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#f6efdd';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+// 拉框：把快照本身铺满屏幕当遮罩，拖动时只留选区那一块亮着。
+function pickRegion(source) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'dabaitu-shot-overlay';
+    overlay.dataset.plugin = '@local/dsh-dabaitu';
+    const frozen = document.createElement('img');
+    frozen.src = source.toDataURL('image/png');
+    frozen.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;object-fit:fill';
+    const veil = document.createElement('div');
+    veil.className = 'dabaitu-shot-veil';
+    const rect = document.createElement('div');
+    rect.className = 'dabaitu-shot-rect';
+    rect.style.display = 'none';
+    const tip = document.createElement('div');
+    tip.className = 'dabaitu-shot-tip';
+    tip.textContent = '拖动选择区域，Esc 取消';
+    overlay.append(frozen, veil, rect, tip);
+
+    let start;
+    let point;
+    const place = () => {
+      const x = Math.min(start.x, point.x);
+      const y = Math.min(start.y, point.y);
+      const w = Math.abs(point.x - start.x);
+      const h = Math.abs(point.y - start.y);
+      rect.style.left = x + 'px';
+      rect.style.top = y + 'px';
+      rect.style.width = w + 'px';
+      rect.style.height = h + 'px';
+      tip.style.left = Math.min(window.innerWidth - 40, Math.max(40, x + w / 2)) + 'px';
+      tip.style.top = Math.max(4, y - 24) + 'px';
+      tip.textContent = w + ' × ' + h;
+    };
+    const done = (value) => {
+      window.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+      resolve(value);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        done(undefined);
+      }
+    };
+    overlay.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      overlay.setPointerCapture(event.pointerId);
+      start = { x: event.clientX, y: event.clientY };
+      point = start;
+      rect.style.display = 'block';
+      place();
+    });
+    overlay.addEventListener('pointermove', (event) => {
+      if (start === undefined) return;
+      point = { x: event.clientX, y: event.clientY };
+      place();
+    });
+    overlay.addEventListener('pointerup', (event) => {
+      if (start === undefined) return;
+      point = { x: event.clientX, y: event.clientY };
+      const x = Math.min(start.x, point.x);
+      const y = Math.min(start.y, point.y);
+      const w = Math.abs(point.x - start.x);
+      const h = Math.abs(point.y - start.y);
+      if (w < 3 || h < 3) {
+        done(undefined);
+        return;
+      }
+      done({ x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) });
+    });
+    window.addEventListener('keydown', onKey, true);
+    document.body.append(overlay);
+  });
+}
+
+function cropShot(shot, box) {
+  const dpr = Math.min(4, window.devicePixelRatio || 1);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(box.w * dpr));
+  canvas.height = Math.max(1, Math.round(box.h * dpr));
+  canvas.getContext('2d').drawImage(
+    shot,
+    box.x, box.y, box.w, box.h,
+    0, 0, canvas.width, canvas.height,
+  );
+  return canvas;
+}
+
+function canvasBlob(canvas) {
+  return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), 'image/png'));
+}
+
+// 复制到剪贴板：先走 Clipboard API；不行再退回「选中图片元素 + execCommand('copy')」。
+async function copyCanvas(canvas) {
+  const blob = await canvasBlob(canvas);
+  if (blob === null) return false;
+  try {
+    if (typeof ClipboardItem === 'function' && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      return true;
+    }
+  } catch {}
+  try {
+    const host = document.createElement('div');
+    host.contentEditable = 'true';
+    host.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(blob);
+    host.append(img);
+    document.body.append(host);
+    const range = document.createRange();
+    range.selectNodeContents(host);
+    const selection = document.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const ok = document.execCommand('copy');
+    selection.removeAllRanges();
+    host.remove();
+    URL.revokeObjectURL(img.src);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+// 截图后的提示：缩略图 + 结果，可「保存」或关掉。
+// 保存优先走宿主的 fileActions.save（Electron 另存为对话框）；网页环境退回 <a download>。
+function showShotToast(canvas, copied) {
+  const toast = document.createElement('div');
+  toast.className = 'dabaitu-shot-toast';
+  toast.dataset.plugin = '@local/dsh-dabaitu';
+  const thumb = document.createElement('img');
+  thumb.alt = '';
+  thumb.src = canvas.toDataURL('image/png');
+  const text = document.createElement('span');
+  text.textContent = copied ? '已复制到剪贴板' : '截图完成，可另存';
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.textContent = '保存';
+  const desktop = window.dshDesktop?.fileActions;
+  save.addEventListener('click', async () => {
+    const blob = await canvasBlob(canvas);
+    if (blob === null) return;
+    const name = 'screenshot-' + new Date().toISOString().replace(/[:.]/g, '-') + '.png';
+    if (desktop?.save !== undefined) {
+      const url = URL.createObjectURL(blob);
+      try {
+        const result = await desktop.save({ url, mode: 'saveAs', name, mediaType: 'image/png' });
+        text.textContent = result?.status === 'saved' ? '已保存' : '已取消';
+      } catch {
+        text.textContent = '保存失败';
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    text.textContent = '已下载';
+  });
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.textContent = '关闭';
+  const dismiss = () => toast.remove();
+  close.addEventListener('click', dismiss);
+  toast.append(thumb, text, save, close);
+  document.body.append(toast);
+  window.setTimeout(dismiss, 8000);
+}
+
+// 点一下就走完整条流程：快照 → 拉框 → 裁切 → 复制 → 提示。Esc 只取消拉框。
+async function runScreenshot() {
+  let shot;
+  try {
+    shot = await snapshotInterface();
+  } catch (error) {
+    console.warn('[dsh-dabaitu] 界面快照失败：', error);
+    shot = undefined;
+  }
+  if (shot === undefined) {
+    // 快照走不通时仍让用户能拉框：换成纯色底，至少选区尺寸和复制流程还在。
+    console.warn('[dsh-dabaitu] 界面快照不可用，改用空白底拉框');
+    shot = fallbackSurface();
+  }
+  const region = await pickRegion(shot);
+  if (region === undefined) return;
+  const cropped = cropShot(shot, region);
+  const copied = await copyCanvas(cropped);
+  showShotToast(cropped, copied);
 }
 
 window.__ModuleLoader__.load({
@@ -139,8 +526,64 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const h = React.createElement;
 
+    // ── 品牌自定义：插件设置页里改图标与文字，改完立刻生效并记住 ──────────────
+    // 存 localStorage（键名带包名，避免和别的插件撞）：刷新、重启都还在；
+    // 用一个极小的订阅器把改动推给已经挂载的品牌槽位，不用重载页面。
+    const BRAND_KEY = '@local/dsh-dabaitu:brand';
+    const BRAND_LIMIT = 2 * 1024 * 1024;
+    const brandListeners = new Set();
+    let brandCache;
+
+    function readBrand() {
+      if (brandCache !== undefined) return brandCache;
+      brandCache = { mark: MARK_SRC, name: NAME_TEXT };
+      try {
+        const raw = window.localStorage.getItem(BRAND_KEY);
+        if (raw !== null) {
+          const saved = JSON.parse(raw);
+          if (typeof saved?.mark === 'string' && saved.mark.startsWith('data:image/')) brandCache.mark = saved.mark;
+          if (typeof saved?.name === 'string' && saved.name.trim() !== '') brandCache.name = saved.name;
+        }
+      } catch {}
+      return brandCache;
+    }
+
+    function writeBrand(next) {
+      brandCache = { mark: next.mark, name: next.name };
+      try {
+        window.localStorage.setItem(BRAND_KEY, JSON.stringify(brandCache));
+      } catch (error) {
+        console.warn('[dsh-dabaitu] 品牌设置没能写入 localStorage：', error);
+      }
+      for (const listener of brandListeners) {
+        try { listener(); } catch {}
+      }
+    }
+
+    function resetBrand() {
+      brandCache = undefined;
+      try { window.localStorage.removeItem(BRAND_KEY); } catch {}
+      readBrand();
+      for (const listener of brandListeners) {
+        try { listener(); } catch {}
+      }
+    }
+
+    // 让组件订阅品牌设置；useState 的 setter 会被复用成「强制重渲染」。
+    function useBrand() {
+      const [, bump] = React.useState(0);
+      React.useEffect(() => {
+        const listener = () => bump((value) => value + 1);
+        brandListeners.add(listener);
+        return () => brandListeners.delete(listener);
+      }, []);
+      return readBrand();
+    }
+
     // 肉包吉祥物：已从贴图中抠出（去掉白底与「肉包」字样），128x76 PNG，内联为 data URI。
+    // 设置页换过图标就用换过的。
     function BunMark({ size }) {
+      const brand = useBrand();
       const side = typeof size === 'number' && size > 0 ? size : 24;
       return h('span', {
         'aria-hidden': 'true',
@@ -149,7 +592,7 @@ window.__ModuleLoader__.load({
           alignItems: 'center', justifyContent: 'center',
         },
       }, h('img', {
-        src: MARK_SRC, alt: '', draggable: false, loading: 'eager',
+        src: brand.mark, alt: '', draggable: false, loading: 'eager',
         style: {
           display: 'block', maxWidth: '100%', maxHeight: '100%', objectFit: 'contain',
           filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.45))',
@@ -158,41 +601,285 @@ window.__ModuleLoader__.load({
     }
 
     function BunName() {
+      const brand = useBrand();
       // 与外壳回退标签同一套排版（17px、不换行），保持品牌行的视觉一致。
       return h('span', {
         style: { letterSpacing: 0, whiteSpace: 'nowrap', fontSize: '17px' },
-      }, NAME_TEXT);
+      }, brand.name);
     }
 
-    // 「豆包」按钮：在应用内右侧的 Browser tab 里打开 doubao.com。
-    // 先走 ISidebarRight 的 openTab（它用的就是当前会话，也就是这张标题栏所属的会话）；
-    // 万一它抛错（没有当前会话、browser 这一类 tab 没注册），退到 openTabIn，再退到系统浏览器。
+    // 「豆包」按钮：在应用内右侧的 Browser tab 里打开 doubao.com，并且登录状态能被记住。
+    //
+    // 宿主的 Browser tab 是**按会话**建的，而且每个 tab 打开时都会新分配一个 guest 租约；
+    // 同一进程里能不能带上 cookie 只看两件事：
+    //   1) 落在哪个会话 —— 有 Workspace 的会话按 cwd 共用一个存储分区，没归组的会话按
+    //      `session:<id>` 各自隔离（宿主 README 与 main.js 的 browser-guests 都这么写）；
+    //   2) 那条 tab 还在不在 —— 关掉 tab、切走导致 guest 被回收，cookie 就没了。
+    // 所以这里不新开 tab：先在当前会话里找已有的那条浏览器 tab（导入时打过标记，或者就是
+    // 网址对得上的那条），有就聚焦并导航过去；没有才新开一条，并在导航前把「常驻标记」与
+    // 固定地址参数写进这条 tab 的 params —— 宿主把 tab 的 params 存进侧栏布局、随布局一起
+    // 持久化并跨会话恢复，于是这条 tab 在切换会话、重开面板之后还是同一条，cookie 也还在。
+    // 之后再点，就都指向这条常驻 tab。
+    const DOUBAO_TAB_PARAMS = { url: DOUBAO_URL, dabaitu: 'doubao' };
+    const DOUBAO_TAB_ADDRESS = 'sidebar://browser';
+
+    function isDoubaoUrl(value) {
+      if (typeof value !== 'string') return false;
+      try {
+        const url = new URL(value);
+        return url.protocol === 'https:' && (url.hostname === 'www.doubao.com' || url.hostname.endsWith('.doubao.com'));
+      } catch {
+        return false;
+      }
+    }
+
+    function doubaoTabId(right, sessionId) {
+      if (typeof sessionId !== 'string' || typeof right.tabsIn !== 'function') return undefined;
+      const tab = right.tabsIn(sessionId).find((entry) => {
+        const params = entry?.navigation?.getSnapshot?.()?.params;
+        return params?.dabaitu === 'doubao' || isDoubaoUrl(params?.url);
+      });
+      return tab?.id;
+    }
+
     function makeDoubaoAction(ctx) {
-      const openOptions = { params: { url: DOUBAO_URL } };
-      const openDoubao = (sessionId) => {
+      // 先走 ISidebarRight（它落在当前显示的会话上）；取不到就退到系统浏览器。
+      // 已有常驻 tab 时只做导航 + 聚焦 + 展开三件事，绝不再 openTab，
+      // 否则宿主会新分配一个 guest 租约，等于换了一个浏览器上下文。
+      const reuseOrOpen = (sessionId) => {
         const right = ctx.get('sidebarRight');
         const tabs = ctx.get('sidebarRightTabs');
-        if (right !== undefined && (tabs === undefined || tabs.get('browser') !== undefined)) {
+        if (right === undefined || (tabs !== undefined && tabs.get('browser') === undefined)) return false;
+        const existing = doubaoTabId(right, sessionId);
+        if (existing !== undefined) {
+          // tabDomain.navigate 是宿主自己的 tab 记账入口：把地址与参数换成豆包这一条。
           try {
-            right.openTab('browser', openOptions);
-            return;
+            right.tabDomain.navigate(sessionId, existing, {
+              address: DOUBAO_TAB_ADDRESS,
+              params: DOUBAO_TAB_PARAMS,
+            });
           } catch {}
-          if (typeof sessionId === 'string') {
-            try {
-              right.openTabIn(sessionId, 'browser', openOptions);
-              return;
-            } catch {}
-          }
+          try { right.focus(existing); } catch {}
+          try { if (right.isExpanded?.() === false) right.toggleExpanded(); } catch {}
+          return true;
         }
+        try {
+          right.openTab('browser', { params: DOUBAO_TAB_PARAMS });
+          return true;
+        } catch {}
+        if (typeof sessionId === 'string') {
+          try {
+            right.openTabIn(sessionId, 'browser', { params: DOUBAO_TAB_PARAMS });
+            return true;
+          } catch {}
+        }
+        return false;
+      };
+      const openDoubao = () => {
+        const right = ctx.get('sidebarRight');
+        const sessionId = right?.mounted?.getSnapshot?.();
+        if (reuseOrOpen(sessionId)) return;
         window.open(DOUBAO_URL, '_blank', 'noopener,noreferrer');
       };
-      return function DoubaoAction({ sessionId }) {
+      return function DoubaoAction() {
+        // 挂载时量一次窗口控制区宽度，把按钮钉在它的左边（最靠右的可点位置），
+        // 顺手把自己的宽度记下来，好让左边的截图按钮贴着它排。
+        const ref = React.useRef(null);
+        React.useEffect(() => {
+          if (ref.current === null) return undefined;
+          const sync = measureCaptionControls(ref.current);
+          const report = () => {
+            const width = ref.current?.getBoundingClientRect().width;
+            if (typeof width === 'number' && width > 0) {
+              document.documentElement.style.setProperty('--dabaitu-doubao-width', Math.ceil(width) + 'px');
+            }
+          };
+          report();
+          window.addEventListener('resize', report);
+          return () => {
+            window.removeEventListener('resize', report);
+            sync;
+          };
+        }, []);
         return h('button', {
+          ref: ref,
           type: 'button',
           className: 'dabaitu-header-action',
           title: '在应用内打开 ' + DOUBAO_URL,
-          onClick: () => openDoubao(sessionId),
+          onClick: openDoubao,
         }, DOUBAO_TEXT);
+      };
+    }
+
+    // 截图按钮：紧挨在豆包左边，点一下直接进截图（没有选项菜单）。
+    // 用的是「不隐藏界面」那条快照路径；快照本身只含应用界面，不会把本包这两个按钮
+    // 之外的任何东西带进来。拉框时 Esc 取消，截完复制到剪贴板并冒缩略图提示。
+    function ShotAction() {
+      const [busy, setBusy] = React.useState(false);
+      const ref = React.useRef(null);
+      React.useEffect(() => {
+        if (ref.current === null) return undefined;
+        return measureCaptionControls(ref.current);
+      }, []);
+      const start = async () => {
+        if (busy) return;
+        setBusy(true);
+        try {
+          await runScreenshot();
+        } finally {
+          setBusy(false);
+        }
+      };
+      return h('button', {
+        ref: ref,
+        type: 'button',
+        className: 'dabaitu-shot',
+        title: '截图（拉框选区，复制到剪贴板）',
+        'aria-label': '截图',
+        disabled: busy,
+        onClick: start,
+      },
+        // 剪刀图标：两条刀刃交于左下，两个环形手柄在右下——截图/裁剪的通用符号。
+        h('svg', { width: 15, height: 15, viewBox: '0 0 16 16', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round' },
+          h('circle', { cx: 4.1, cy: 11.9, r: 2.05 }),
+          h('circle', { cx: 4.1, cy: 4.1, r: 2.05 }),
+          h('path', { d: 'M5.85 5.5 14 12.6' }),
+          h('path', { d: 'M5.85 10.5 14 3.4' }),
+        ),
+      );
+    }
+
+    // 插件设置页里的「品牌」表单：换个图标、改个文字，点保存。
+    // 宿主把这条注册在 plugins.row.config 下（key 是 `<包名>#<行 id>`），
+    // 于是插件页那一行会多出一个配置入口，点进去就是这个表单。
+    // 用 placeholder / defaultValue 而不是受控 value，避免跟宿主的表单状态打架；
+    // 读当前值用 useBrand()。
+    function BrandSettings({ view }) {
+      const brand = useBrand();
+      const [draftMark, setDraftMark] = React.useState(null);
+      const [draftName, setDraftName] = React.useState(null);
+      const [error, setError] = React.useState('');
+      const [saved, setSaved] = React.useState(false);
+      const fileRef = React.useRef(null);
+      const mark = draftMark ?? brand.mark;
+      const name = draftName ?? brand.name;
+
+      const pickFile = (event) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (file === undefined) return;
+        if (!file.type.startsWith('image/')) {
+          setError('请选择图片文件（PNG / SVG / JPG）。');
+          return;
+        }
+        if (file.size > BRAND_LIMIT) {
+          setError('图片太大（上限 2 MB），请换一张小一点的。');
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          setError('');
+          setDraftMark(typeof reader.result === 'string' ? reader.result : null);
+        };
+        reader.onerror = () => setError('读取图片失败。');
+        reader.readAsDataURL(file);
+      };
+
+      const save = () => {
+        const trimmed = name.trim();
+        if (trimmed === '') {
+          setError('名称不能为空。');
+          return;
+        }
+        setError('');
+        writeBrand({ mark, name: trimmed });
+        setDraftMark(null);
+        setDraftName(null);
+        setSaved(true);
+        window.setTimeout(() => setSaved(false), 2200);
+      };
+
+      const restore = () => {
+        resetBrand();
+        setDraftMark(null);
+        setDraftName(null);
+        setError('');
+      };
+
+      // summary 视图只给一行摘要（插件页那一行用得上）。
+      if (view === 'summary') return '左上角品牌：' + brand.name;
+
+      return h('div', { className: 'dabaitu-brand-form' },
+        h('div', { className: 'dabaitu-brand-row' },
+          h('img', { className: 'dabaitu-brand-preview', src: mark, alt: '' }),
+          h('div', { className: 'dabaitu-brand-col' },
+            h('button', {
+              type: 'button',
+              className: 'dabaitu-brand-btn',
+              onClick: () => fileRef.current?.click(),
+            }, '上传图标…'),
+            h('span', { className: 'dabaitu-brand-hint' }, 'PNG / SVG / JPG，建议正方形，上限 2 MB'),
+            h('input', {
+              ref: fileRef,
+              type: 'file',
+              accept: 'image/*',
+              style: { display: 'none' },
+              onChange: pickFile,
+            }),
+          ),
+        ),
+        h('label', { className: 'dabaitu-brand-field' },
+          h('span', { className: 'dabaitu-brand-hint' }, '左上角文字'),
+          h('input', {
+            type: 'text',
+            className: 'dabaitu-brand-input',
+            placeholder: NAME_TEXT,
+            value: name,
+            maxLength: 40,
+            onChange: (event) => setDraftName(event.target.value),
+          }),
+        ),
+        error === '' ? null : h('p', { className: 'dabaitu-brand-error' }, error),
+        h('div', { className: 'dabaitu-brand-actions' },
+          h('button', { type: 'button', className: 'dabaitu-brand-btn dabaitu-brand-primary', onClick: save }, '保存'),
+          h('button', { type: 'button', className: 'dabaitu-brand-btn', onClick: restore }, '恢复默认'),
+          saved ? h('span', { className: 'dabaitu-brand-hint' }, '已保存') : null,
+        ),
+      );
+    }
+
+    // 插件页头的入口：只在打开本包的页面时出现，点开是同一个品牌表单。
+    // 用自带的模态框（不依赖宿主的对话框服务），所以这条路跟 keyed 账本完全无关。
+    function makeBrandAction(ctx) {
+      return function BrandAction({ subject }) {
+        const [open, setOpen] = React.useState(false);
+        // subject 可能是 bundle / row / item 三种，只有本包才画按钮。
+        const name = subject?.kind === 'row' ? subject.pkg?.name : subject?.kind === 'bundle' ? subject.pkg?.name : undefined;
+        if (name !== '@local/dsh-dabaitu') return null;
+        const close = () => setOpen(false);
+        return h(React.Fragment, null,
+          h('button', {
+            type: 'button',
+            className: 'dabaitu-brand-btn',
+            onClick: () => setOpen(true),
+          }, '自定义品牌…'),
+          open ? h('div', {
+            className: 'dabaitu-brand-modal',
+            role: 'dialog',
+            'aria-modal': 'true',
+            'aria-label': '自定义左上角品牌',
+            onClick: (event) => { if (event.target === event.currentTarget) close(); },
+            onKeyDown: (event) => { if (event.key === 'Escape') close(); },
+          },
+            h('div', { className: 'dabaitu-brand-modal-body' },
+              h('h3', { className: 'dabaitu-brand-modal-title' }, '自定义左上角品牌'),
+              h(BrandSettings, { view: 'page' }),
+              h('div', { className: 'dabaitu-brand-actions' },
+                h('button', { type: 'button', className: 'dabaitu-brand-btn', onClick: close }, '关闭'),
+              ),
+            ),
+          ) : null,
+        );
       };
     }
 
@@ -219,25 +906,57 @@ window.__ModuleLoader__.load({
           return () => tag.remove();
         }, '@local/dsh-dabaitu: paper grain overlay');
 
-        // 4) 标题栏「豆包」：conversation.session.header.actions 是 kind:'list' 的
-        //    session 槽位（由 ui-conversation 的 conversation.session.header 填充声明），
-        //    宿主目录里它的 registerOptions 是「id 必填，order/label 可选」，条目按 order
-        //    升序排在标题右边。自带的几档是 agent-team -20 / agent-preset -10 /
-        //    subagent-catalog 10 / job-list 20，所以 -30 正好落在标题正后方。
+        // 4) 外壳顶栏「豆包」：shell.overlay 是 ui-layout 的 AppFrame 声明的全窗口浮层
+        //    （kind:'list'、root 作用域，registerOptions 是「id 必填，order/label 可选」）。
+        //    浮层本身 pointer-events:none、只有子元素接收指针，所以不挡住应用；
+        //    条目按 order 升序，自带那批都是 0，这里给 100 排在它们之后。
+        //    按钮自己 position:fixed 钉在窗口顶端、侧栏开关右侧（见 actionStyle）。
         const DoubaoAction = makeDoubaoAction(ctx);
-        ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
-          name: 'conversation.session.header.actions',
+        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+          name: 'shell.overlay',
           id: 'dabaitu-doubao',
-          order: -30,
+          order: 100,
           label: DOUBAO_TEXT,
         }, DoubaoAction));
+
+        // 5) 顶栏「截图」，就排在豆包左边：同样是 shell.overlay 里的一条，右侧偏移在
+        //    豆包宽度之外再加一格（见 actionStyle 的 .dabaitu-shot）。
+        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+          name: 'shell.overlay',
+          id: 'dabaitu-screenshot',
+          order: 99,
+          label: '截图',
+        }, ShotAction));
 
         ctx.effect(() => {
           const tag = document.createElement('style');
           actionStyle(tag);
+          tag.textContent += SCRATCH_STYLE;
+          tag.textContent += BRAND_FORM_STYLE;
           document.head.append(tag);
           return () => tag.remove();
         }, '@local/dsh-dabaitu: header action style');
+
+        // 6) 插件设置页：品牌的自定义表单（图标可上传、文字可改、点保存生效）。
+        //    plugins.row.config 是 keyed 槽位，key 必须是 `<包名>#<行 id>`，
+        //    行 id 就是 cordis.patch.yml 里那一行（dabaitu-look）。
+        //    注意：这条（keyed 槽位）只有在插件页里本行对应的声明出现时才登记得上，
+        //    所以下面第 7 段还给同一个表单挂了一个不依赖 keyed 账本的入口。
+        ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
+          name: 'plugins.row.config',
+          key: '@local/dsh-dabaitu#dabaitu-look',
+        }, BrandSettings));
+
+        // 7) 插件页头部的「自定义品牌…」按钮：plugins.detail.actions 是 list 槽位，
+        //    只要打开的是本包的页面就会出现，不受上面 keyed 账本时序影响。
+        //    只在 subject 指向本包时才渲染，点开关一个自己的模态框装同一个表单。
+        const BrandAction = makeBrandAction(ctx);
+        ctx.slots.inject('plugins.detail.actions', () => ctx.slots.register({
+          name: 'plugins.detail.actions',
+          id: 'dabaitu-brand',
+          order: 10,
+          label: '自定义品牌',
+        }, BrandAction));
       },
     };
   },
