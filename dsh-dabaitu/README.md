@@ -24,10 +24,15 @@
    `titleBarOverlay`，高 40px），网页内容压在那下面就点不到，所以按钮从右边让开这一条，
    钉在窗口控制按钮的左边沿——这是网页能占的最右一格。让开的宽度由
    `measureCaptionControls` 填进 `--dabaitu-caption-controls`：实现了 Window Controls
-   Overlay 的环境量真实几何，否则用 138px。
+   Overlay 的环境量真实几何，否则用 138px。没有 `data-windows-titlebar` 的环境
+   （浏览器直接打开 Web GUI、macOS）右上角没有系统按钮，那 138px 不让，两个按钮直接贴右边距。
    `sidebarRight` 与 `sidebarRightTabs` 用 `ctx.get()` 可选取用（宿主 ui-chat 同样写法），
    不在 `inject` 里声明——声明了会在它们缺席时把整包挂起，纸纹与品牌跟着一起没。
    取不到时退成系统浏览器 `window.open`。
+   已有常驻 tab 时只调 `tabDomain.navigate` + `focus` + 展开，不新开 tab（新开等于换一个
+   guest 租约、丢掉登录态）。但 `navigate` 只改 tab 的 navigation 记录，**已经挂载**的浏览器
+   body 不会重新加载（`initialUrl` 是 `useRef`，只在 mount 时读一次），所以这时会在顶部冒一条
+   提示告诉用户「地址已写入地址栏，回车即可打开」。
    （宿主没有「横跨整个框架的标题栏」槽位：`shell.leading` 只在抽屉或 macOS 收起侧栏时挂载，
    `root` 是单值槽位、占用会顶掉整个外壳，所以用的是 `shell.overlay` + 固定定位。）
 4. **顶栏的「截图」**：紧挨在「豆包」左边的剪刀图标，**点一下直接开始截图**（没有选项菜单）：
@@ -38,19 +43,44 @@
      页面里既看不到选择框也不报错——这正是最初「点了没反应」的原因。
    - **快照怎么来**：把 `documentElement` 连同全部同源样式表克隆进
      `<foreignObject>`，再经 `<img>` 栅格化成画布。不依赖第三方库、不需要任何权限。
-     SVG 命名空间的节点会先换成等尺寸占位（混进 `foreignObject` 会让整段解析失败）。
+     SVG 命名空间的节点会先换成等尺寸占位（混进 `foreignObject` 会让整段解析失败）；
+     尺寸从**原树**上量，clone 是游离节点、`getBoundingClientRect()` 一律返回 0。
+   - **遮罩是画布本身**：拉框时直接把快照画布 `position:fixed` 铺满屏幕，不走
+     `toDataURL()`——整屏 PNG 编码是同步的，大写屏下会卡一下。只有走兜底路径
+     （快照不可用、只剩纯色底）时才退回 `<img>` + data URI。
    - **截到的范围**：快照天然只含本应用界面，所以是一张纯净的应用截图。
    - **兜底**：若本次栅格化不可用（Chromium 拒画或画布被污染，会抽查中心像素判断），
      退回纯色底 + 正常拉框，选区尺寸与复制流程仍然可用（Console 会打一条 warn）。
    - 裁切按 `devicePixelRatio` 放大，高分屏下仍是清晰像素。
 
    平台限制：只截得到的范围是本应用界面——窗口背后的其它窗口本来就不在页面里。
-   若要连同桌面一起截，需要宿主暴露 `desktopCapturer`/`capturePage` 之类的通道（当前没有）。
+   要截其它应用窗口，用下面第 5 条的「系统截图」按钮。
+
+5. **顶栏的「系统截图」**：再往左一个显示器图标，**点一下截其它应用窗口**。
+   它触发 Windows 自己的截图条（Win+Shift+S），再把结果从剪贴板取回来，
+   所以能截到本应用之外——截图动作发生在系统层，不在页面里。
+   流程：清空剪贴板（当「开始」信号，免得读到上一次复制的东西）→ 顶部挂一条提示
+   「请按 Win+Shift+S 框选」→ 每 700ms 读一次 `navigator.clipboard.read()`（上限 20 秒）
+   → 读到图片就转成画布，走和第 4 条完全相同的「已复制/保存」提示条。
+   - **为什么不让程序自己发 Win+Shift+S**：页面里发不出真实的系统按键（`KeyboardEvent`
+     只在自己的文档里派发，到不了操作系统）；宿主的 `dshDesktop` 也没暴露进程启动或按键
+     注入（`preload-app.cjs` 的 `createProductApi()` 只有 fileActions / browser / fileDrag /
+     keyboard / shortcuts / updates 等）；`ms-screenclip:` 协议还会被 `main.js` 的两道导航
+     拦截挡下（只放行 `dsh-app:` 与同源 http，见 `main.js:20138` / `20200`）。
+     所以这一步只能由用户按一次快捷键。
+   - **读剪贴板不需要授权**：Electron 的 `clipboard-read` 对可信页面默认放行。
+   - 剪贴板里没有 `image/*` 就当这一轮没截，继续轮询；超时把提示改成「没等到截图结果」。
+
+   **三个按钮的排布**：从右到左是「豆包 → 截图 → 系统截图」。每个按钮只量**自己**的宽度
+   （`--dabaitu-w-doubao` / `-shot` / `-systemshot`），自己的 `right` 由 `offsetBefore(id)`
+   把右边那几个的宽度在 `calc` 里相加得出。早先的做法是让每个按钮去算「右边那个有多宽」，
+   而三个宽度是异步量出来的、谁先到不一定，任何一格没量到就退回默认值 → 按钮叠在一起；
+   现在各量各的、互不依赖，不存在这个竞争。
 
 品牌蓝与红/绿/琥珀语义色不变；只有当背景用的 `deepseek-50/100/200`（用户气泡等）
 跟着纸走，比页面底色略深，气泡仍可分辨。选中文本改成琥珀色高亮。
 
-全部改动只在运行时生效：卸载本包即恢复官方品牌与原配色、顶栏也不再有「截图」和「豆包」。
+全部改动只在运行时生效：卸载本包即恢复官方品牌与原配色、顶栏也不再有「系统截图」「截图」和「豆包」。
 
 ## 插件列表里的图标与名字
 
@@ -93,8 +123,12 @@ key 必须是 `<包名>#<行 id>`（本包是 `@local/dsh-dabaitu#dabaitu-look`�
 - 只去掉豆包：删掉 `apply()` 里第 4 段两段（注册 + 那条 `<style>`）、`makeDoubaoAction`、
   `actionStyle` 里的 `.dabaitu-header-action` 规则与 `DOUBAO_TEXT` / `DOUBAO_URL`。
 - 只去掉截图：删掉 `apply()` 里第 5 段、`ShotAction`、`runScreenshot` 及其下面的
-  `grabScreenFrame` / `pickRegion` / `cropShot` / `canvasBlob` / `copyCanvas` /
-  `showShotToast` / `withWindowHidden` / `findBrowserFrame`，以及 `SCRATCH_STYLE`。
+  `snapshotInterface` / `fallbackSurface` / `tipFloor` / `pickRegion` / `cropShot` /
+  `canvasBlob` / `copyCanvas` / `showShotToast`，以及 `SCRATCH_STYLE` 和 `SHOT_CURSOR`。
+- 只去掉系统截图：删掉 `apply()` 里第 5b 段、`SystemShotAction`、`runSystemScreenshot` /
+  `readClipboardImage` / `blobToCanvas` / `clearClipboard` / `showSystemShotHint`
+  （还有两个 `SYSTEM_SHOT_*` 常量），以及 `actionStyle` 里的 `.dabaitu-systemshot` 规则；
+  记得把 `.dabaitu-shot` 右偏移里的 `var(--dabaitu-systemshot-width,0px)` 去掉。
 
 ## 微调
 
@@ -104,8 +138,20 @@ key 必须是 `<包名>#<行 id>`（本包是 `@local/dsh-dabaitu#dabaitu-look`�
 - 文字/图标：`NAME_TEXT`、`assets/mark-128.png`（重新生成见 `../.tools/cut_mark.py`）。
 - 豆包的文字与地址：`DOUBAO_TEXT`、`DOUBAO_URL`；贴边的距离改 `CAPTION_EDGE_GAP`
   （`--dabaitu-caption-gap`，默认 8px），给窗口控制按钮让出的宽度改
-  `CAPTION_CONTROLS_WIDTH`（`--dabaitu-caption-controls`，默认 138px）；
+  `CAPTION_CONTROLS_WIDTH`（`--dabaitu-caption-controls`，默认 138px，只在有 Windows 标题栏
+  时生效；浏览器直接打开 Web GUI 时两个按钮贴右边距，见 `NOT_WINDOWS`）；
   `order` 只决定和其它浮层条目的先后，不影响屏幕位置。
+
+## 这个包在哪、怎么被加载
+
+本目录 `E:\AI\deepseek\plugins\dsh-dabaitu` 是**唯一的**源码与运行目录。
+`C:\Users\hs\.dsh\profiles\desktop\package.json` 用
+`"@local/dsh-dabaitu": "link:E:/AI/deepseek/plugins/dsh-dabaitu"` 指过来，
+`node_modules\@local\dsh-dabaitu` 是指向这里的 junction —— 改这里的文件就是改运行时。
+（`E:\AI\deepseek\test\dsh-dabaitu` 是废弃的旧位置，不要再改那一边。）
+
+改完 `client.js` 要整页刷新 Web GUI（`Ctrl+R`）才生效：它是客户端插件，
+非开发 checkout 下没有热更新路径。
 
 调色与贴图由 `../.tools/make_paper_theme.py` 生成，`../.tools/make_look_pack.py` 组装本包；
 `../.tools/check_tokens.py` 核对这里覆盖的每个 token 名确实存在于宿主样式表。

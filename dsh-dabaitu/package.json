@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-dabaitu",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "description": "大白兔外观包（一个插件管四件）：侧栏品牌图标 + 「大白兔白又白」文字，护眼暖黄纸质主题与纸纹叠加层，外壳顶栏的「截图」（可含界面或隐藏界面后拉框截图）与「豆包」入口。",
